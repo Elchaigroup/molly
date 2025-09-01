@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import pandas as pd
 from collections import deque
 import time
 import os
@@ -20,16 +19,15 @@ GROQ_MODEL = "llama3-8b-8192"
 
 # Check for required environment variables
 if not SCRAPINGDOG_API_KEY or not GROQ_API_KEY:
-    st.error("🔑 Missing API Keys! Please configure SCRAPINGDOG_API_KEY and GROQ_API_KEY in environment variables.")
-    st.info("📝 Contact your administrator to set up the required API keys.")
+    st.error("Missing API Keys! Please configure SCRAPINGDOG_API_KEY and GROQ_API_KEY in environment variables.")
+    st.info("Contact your administrator to set up the required API keys.")
     st.stop()
 
 # -------------------
 # DATABASE CONFIGURATION (Future-ready for online DB)
 # -------------------
-# Database settings - easily switchable to PostgreSQL later
 USE_ONLINE_DB = os.getenv("USE_ONLINE_DB", "false").lower() == "true"
-DATABASE_URL = os.getenv("DATABASE_URL")  # For future PostgreSQL
+DATABASE_URL = os.getenv("DATABASE_URL")
 LOCAL_DB_PATH = "/tmp/seo_analysis_history.db" if os.getenv("RENDER") else "seo_analysis_history.db"
 
 class DatabaseManager:
@@ -53,7 +51,6 @@ class DatabaseManager:
         cursor = conn.cursor()
         
         if self.db_type == "postgresql":
-            # PostgreSQL syntax
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS analysis_sessions (
                     id SERIAL PRIMARY KEY,
@@ -94,7 +91,6 @@ class DatabaseManager:
                 )
             ''')
         else:
-            # SQLite syntax
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS analysis_sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +141,6 @@ class DatabaseManager:
         conn = self.get_connection()
         cursor = conn.cursor()
         
-        # Insert main session
         if self.db_type == "postgresql":
             cursor.execute('''
                 INSERT INTO analysis_sessions (topic, client_site, num_sites, max_pages, ai_recommendations)
@@ -160,38 +155,38 @@ class DatabaseManager:
             session_id = cursor.lastrowid
         
         # Insert competitor results
-        for _, row in competitor_data.iterrows():
+        for result in competitor_data:
             if self.db_type == "postgresql":
                 cursor.execute('''
                     INSERT INTO competitor_results 
                     (session_id, url, title, meta, h1, word_count, seo_score, content)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (session_id, row['url'], row['title'], row['meta'], 
-                      row['h1'], row['word_count'], row['seo_score'], row['content']))
+                ''', (session_id, result['url'], result['title'], result['meta'], 
+                      result['h1'], result['word_count'], result['seo_score'], result['content']))
             else:
                 cursor.execute('''
                     INSERT INTO competitor_results 
                     (session_id, url, title, meta, h1, word_count, seo_score, content)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (session_id, row['url'], row['title'], row['meta'], 
-                      row['h1'], row['word_count'], row['seo_score'], row['content']))
+                ''', (session_id, result['url'], result['title'], result['meta'], 
+                      result['h1'], result['word_count'], result['seo_score'], result['content']))
         
         # Insert client results
-        for _, row in client_data.iterrows():
+        for result in client_data:
             if self.db_type == "postgresql":
                 cursor.execute('''
                     INSERT INTO client_results 
                     (session_id, url, title, meta, h1, word_count, seo_score, content)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ''', (session_id, row['url'], row['title'], row['meta'], 
-                      row['h1'], row['word_count'], row['seo_score'], row['content']))
+                ''', (session_id, result['url'], result['title'], result['meta'], 
+                      result['h1'], result['word_count'], result['seo_score'], result['content']))
             else:
                 cursor.execute('''
                     INSERT INTO client_results 
                     (session_id, url, title, meta, h1, word_count, seo_score, content)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (session_id, row['url'], row['title'], row['meta'], 
-                      row['h1'], row['word_count'], row['seo_score'], row['content']))
+                ''', (session_id, result['url'], result['title'], result['meta'], 
+                      result['h1'], result['word_count'], result['seo_score'], result['content']))
         
         conn.commit()
         conn.close()
@@ -200,73 +195,110 @@ class DatabaseManager:
     def load_analysis_sessions(self):
         """Load all analysis sessions from database"""
         conn = self.get_connection()
-        query = '''
+        cursor = conn.cursor()
+        cursor.execute('''
             SELECT id, timestamp, topic, client_site, num_sites, max_pages 
             FROM analysis_sessions 
             ORDER BY timestamp DESC
-        '''
-        sessions = pd.read_sql_query(query, conn)
+        ''')
+        sessions = cursor.fetchall()
         conn.close()
-        return sessions
+        
+        # Convert to list of dicts
+        session_list = []
+        for session in sessions:
+            session_list.append({
+                'id': session[0],
+                'timestamp': session[1],
+                'topic': session[2],
+                'client_site': session[3],
+                'num_sites': session[4],
+                'max_pages': session[5]
+            })
+        
+        return session_list
     
     def load_session_details(self, session_id):
         """Load detailed results for a specific session"""
         conn = self.get_connection()
+        cursor = conn.cursor()
         
         # Load session info
-        session_query = '''
-            SELECT * FROM analysis_sessions WHERE id = %s
-        ''' if self.db_type == "postgresql" else '''
-            SELECT * FROM analysis_sessions WHERE id = ?
-        '''
-        session_info = pd.read_sql_query(session_query, conn, params=(session_id,))
+        param = (session_id,)
+        if self.db_type == "postgresql":
+            cursor.execute('SELECT * FROM analysis_sessions WHERE id = %s', param)
+        else:
+            cursor.execute('SELECT * FROM analysis_sessions WHERE id = ?', param)
+        
+        session_info = cursor.fetchone()
         
         # Load competitor results
-        competitor_query = '''
-            SELECT * FROM competitor_results WHERE session_id = %s
-        ''' if self.db_type == "postgresql" else '''
-            SELECT * FROM competitor_results WHERE session_id = ?
-        '''
-        competitor_results = pd.read_sql_query(competitor_query, conn, params=(session_id,))
+        if self.db_type == "postgresql":
+            cursor.execute('SELECT * FROM competitor_results WHERE session_id = %s', param)
+        else:
+            cursor.execute('SELECT * FROM competitor_results WHERE session_id = ?', param)
+        
+        competitor_results = cursor.fetchall()
         
         # Load client results
-        client_query = '''
-            SELECT * FROM client_results WHERE session_id = %s
-        ''' if self.db_type == "postgresql" else '''
-            SELECT * FROM client_results WHERE session_id = ?
-        '''
-        client_results = pd.read_sql_query(client_query, conn, params=(session_id,))
+        if self.db_type == "postgresql":
+            cursor.execute('SELECT * FROM client_results WHERE session_id = %s', param)
+        else:
+            cursor.execute('SELECT * FROM client_results WHERE session_id = ?', param)
+            
+        client_results = cursor.fetchall()
         
         conn.close()
         
-        return session_info.iloc[0] if not session_info.empty else None, competitor_results, client_results
+        # Convert to proper format
+        if session_info:
+            session_dict = {
+                'id': session_info[0],
+                'timestamp': session_info[1],
+                'topic': session_info[2],
+                'client_site': session_info[3],
+                'num_sites': session_info[4],
+                'max_pages': session_info[5],
+                'ai_recommendations': session_info[6],
+                'session_id': session_info[0]
+            }
+            
+            # Convert results to list of dicts
+            competitor_list = []
+            for row in competitor_results:
+                competitor_list.append({
+                    'url': row[2], 'title': row[3], 'meta': row[4],
+                    'h1': row[5], 'word_count': row[6], 'seo_score': row[7], 'content': row[8]
+                })
+                
+            client_list = []
+            for row in client_results:
+                client_list.append({
+                    'url': row[2], 'title': row[3], 'meta': row[4],
+                    'h1': row[5], 'word_count': row[6], 'seo_score': row[7], 'content': row[8]
+                })
+            
+            return session_dict, competitor_list, client_list
+        
+        return None, [], []
     
     def delete_session(self, session_id):
         """Delete a session and all its related data"""
         conn = self.get_connection()
         cursor = conn.cursor()
         
+        param = (session_id,)
         if self.db_type == "postgresql":
-            cursor.execute('DELETE FROM competitor_results WHERE session_id = %s', (session_id,))
-            cursor.execute('DELETE FROM client_results WHERE session_id = %s', (session_id,))
-            cursor.execute('DELETE FROM analysis_sessions WHERE id = %s', (session_id,))
+            cursor.execute('DELETE FROM competitor_results WHERE session_id = %s', param)
+            cursor.execute('DELETE FROM client_results WHERE session_id = %s', param)
+            cursor.execute('DELETE FROM analysis_sessions WHERE id = %s', param)
         else:
-            cursor.execute('DELETE FROM competitor_results WHERE session_id = ?', (session_id,))
-            cursor.execute('DELETE FROM client_results WHERE session_id = ?', (session_id,))
-            cursor.execute('DELETE FROM analysis_sessions WHERE id = ?', (session_id,))
+            cursor.execute('DELETE FROM competitor_results WHERE session_id = ?', param)
+            cursor.execute('DELETE FROM client_results WHERE session_id = ?', param)
+            cursor.execute('DELETE FROM analysis_sessions WHERE id = ?', param)
         
         conn.commit()
         conn.close()
-    
-    def get_database_info(self):
-        """Get database statistics"""
-        if self.db_type == "postgresql":
-            return {"type": "PostgreSQL", "persistent": True}
-        else:
-            size = 0
-            if os.path.exists(LOCAL_DB_PATH):
-                size = os.path.getsize(LOCAL_DB_PATH) / (1024 * 1024)  # MB
-            return {"type": "SQLite", "size_mb": size, "persistent": False}
 
 # Initialize database manager
 @st.cache_resource
@@ -276,7 +308,7 @@ def get_db_manager():
 db = get_db_manager()
 
 # -------------------
-# ORIGINAL HELPER FUNCTIONS (with better error handling)
+# HELPER FUNCTIONS
 # -------------------
 def search_topic(topic, num_results=3):
     """Search for competitor sites using ScrapingDog Google API"""
@@ -284,7 +316,7 @@ def search_topic(topic, num_results=3):
     try:
         resp = requests.get(url, timeout=30)
         if resp.status_code != 200:
-            st.warning(f"❌ Google search API failed with status {resp.status_code}")
+            st.warning(f"Google search API failed with status {resp.status_code}")
             return []
         data = resp.json()
         return [item["link"] for item in data.get("organic_results", [])]
@@ -296,7 +328,7 @@ def fetch_html(url):
     """Fetch with ScrapingDog (for competitor sites)"""
     scrape_url = f"https://api.scrapingdog.com/scrape?api_key={SCRAPINGDOG_API_KEY}&url={url}"
     try:
-        resp = requests.get(scrape_url, timeout=60)  # Longer timeout for scraping
+        resp = requests.get(scrape_url, timeout=60)
         if resp.status_code != 200:
             return None
         return resp.text
@@ -307,12 +339,12 @@ def fetch_html_client(url):
     """Direct requests for client site"""
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         resp = requests.get(url, headers=headers, timeout=15)
         return resp.text if resp.status_code == 200 else None
     except Exception as e:
-        st.warning(f"❌ Client fetch failed: {e}")
+        st.warning(f"Client fetch failed: {e}")
         return None
 
 def extract_links(html, base_url):
@@ -338,7 +370,6 @@ def analyze_page(html, url, keyword):
     text = soup.get_text(" ", strip=True)
     word_count = len(text.split())
 
-    # SEO scoring algorithm
     score = 0
     if keyword.lower() in title.lower(): score += 10
     if keyword.lower() in h1_text.lower(): score += 5
@@ -354,7 +385,7 @@ def analyze_page(html, url, keyword):
         "h1": h1_text,
         "word_count": word_count,
         "seo_score": score,
-        "content": text[:2000]  # Limit for storage efficiency
+        "content": text[:2000]
     }
 
 def crawl_site(start_url, keyword, max_pages=5, progress_area=None, client=False):
@@ -369,25 +400,22 @@ def crawl_site(start_url, keyword, max_pages=5, progress_area=None, client=False
             continue
         visited.add(url)
 
-        msg = f"🌍 Crawling: {url}"
+        msg = f"Crawling: {url}"
         if progress_area:
             progress_area.write(msg)
 
-        # Choose appropriate fetch method
         html = fetch_html_client(url) if client else fetch_html(url)
         if not html:
             if progress_area:
-                progress_area.write(f"❌ Failed to fetch {url}")
+                progress_area.write(f"Failed to fetch {url}")
             continue
 
         results.append(analyze_page(html, url, keyword))
 
-        # Find more internal links to crawl
         for link in extract_links(html, start_url):
             if link not in visited and link not in queue:
                 queue.append(link)
 
-        # Rate limiting
         time.sleep(1)
 
     return results
@@ -407,12 +435,28 @@ def groq_generate(prompt):
         if resp.status_code == 200:
             return resp.json()["choices"][0]["message"]["content"]
         else:
-            return f"⚠️ Groq API Error: {resp.text}"
+            return f"Groq API Error: {resp.text}"
     except Exception as e:
-        return f"⚠️ Groq API Error: {e}"
+        return f"Groq API Error: {e}"
+
+# Helper function to create CSV content
+def create_csv(data, headers):
+    """Create CSV content from list of dicts"""
+    if not data:
+        return "No data available"
+    
+    csv_lines = [','.join(headers)]
+    for item in data:
+        row = []
+        for header in headers:
+            value = str(item.get(header, '')).replace(',', ';').replace('\n', ' ')
+            row.append(f'"{value}"')
+        csv_lines.append(','.join(row))
+    
+    return '\n'.join(csv_lines)
 
 # -------------------
-# SESSION STATE INITIALIZATION
+# SESSION STATE
 # -------------------
 if 'current_analysis' not in st.session_state:
     st.session_state.current_analysis = None
@@ -424,37 +468,32 @@ if 'show_history' not in st.session_state:
 # -------------------
 # STREAMLIT APP
 # -------------------
-st.set_page_config(page_title="SEO Analyzer - Production Ready", layout="wide")
+st.set_page_config(page_title="SEO Analyzer Pro", layout="wide")
 
-# Header with navigation buttons
+# Header
 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 with col1:
-    st.title("🚀 SEO Analyzer Pro")
-    # Show database status
-    db_info = db.get_database_info()
-    if db_info["type"] == "PostgreSQL":
-        st.caption("🗄️ PostgreSQL Database (Persistent)")
-    else:
-        st.caption("🗄️ SQLite Database")
+    st.title("SEO Analyzer Pro")
+    st.caption("SQLite Database (Pandas-Free Version)")
 
 with col2:
     if st.session_state.show_history:
-        if st.button("🔙 Back to Analysis", type="secondary"):
+        if st.button("Back to Analysis", type="secondary"):
             st.session_state.show_history = False
             st.rerun()
     else:
-        if st.button("📚 View History", type="secondary"):
+        if st.button("View History", type="secondary"):
             st.session_state.show_history = True
             st.rerun()
 
 with col3:
     if st.session_state.analysis_complete:
-        if st.button("📊 Current Analysis", type="secondary", disabled=not st.session_state.show_history):
+        if st.button("Current Analysis", type="secondary", disabled=not st.session_state.show_history):
             st.session_state.show_history = False
             st.rerun()
 
 with col4:
-    if st.button("🆕 New Analysis", type="primary"):
+    if st.button("New Analysis", type="primary"):
         st.session_state.current_analysis = None
         st.session_state.analysis_complete = False
         st.session_state.show_history = False
@@ -464,34 +503,30 @@ with col4:
 if st.session_state.analysis_complete and st.session_state.current_analysis:
     analysis = st.session_state.current_analysis
     session_info = analysis['session_info']
-    st.info(f"📊 **Currently Loaded:** {session_info['topic']} | Client: {session_info['client_site']} | Session ID: {session_info.get('session_id', 'N/A')}")
+    st.info(f"Currently Loaded: {session_info['topic']} | Client: {session_info['client_site']}")
 elif st.session_state.show_history:
-    st.info("📚 **Browsing History** - Your current analysis is preserved")
-
-# Database status warning for SQLite on Render
-if db.db_type == "sqlite" and os.getenv("RENDER"):
-    st.warning("⚠️ **Render Deployment Note:** SQLite data may be lost on app restart. Upgrade to PostgreSQL for persistence.")
+    st.info("Browsing History - Your current analysis is preserved")
 
 # Show History Section
 if st.session_state.show_history:
     st.markdown("---")
-    st.header("📚 Analysis History")
+    st.header("Analysis History")
     
     try:
         sessions = db.load_analysis_sessions()
         
-        if sessions.empty:
+        if not sessions:
             st.info("No analysis sessions found. Run a new analysis to get started!")
         else:
-            # Search functionality
-            search_term = st.text_input("🔍 Search by topic or client site:")
-            if search_term:
-                mask = (sessions['topic'].str.contains(search_term, case=False, na=False) | 
-                       sessions['client_site'].str.contains(search_term, case=False, na=False))
-                sessions = sessions[mask]
+            search_term = st.text_input("Search by topic or client site:")
             
-            # Display sessions
-            for idx, session in sessions.iterrows():
+            # Simple search filter
+            if search_term:
+                sessions = [s for s in sessions if 
+                          search_term.lower() in s['topic'].lower() or 
+                          search_term.lower() in s['client_site'].lower()]
+            
+            for session in sessions:
                 current_session_id = None
                 if st.session_state.analysis_complete and st.session_state.current_analysis:
                     current_session_id = st.session_state.current_analysis['session_info'].get('session_id')
@@ -499,7 +534,7 @@ if st.session_state.show_history:
                 is_current = (current_session_id == session['id'])
                 
                 with st.expander(
-                    f"{'🟢 CURRENT - ' if is_current else ''}📅 {session['timestamp']} - {session['topic']} ({session['client_site']})",
+                    f"{'CURRENT - ' if is_current else ''}{session['timestamp']} - {session['topic']} ({session['client_site']})",
                     expanded=is_current
                 ):
                     col1, col2, col3 = st.columns([3, 1, 1])
@@ -509,13 +544,13 @@ if st.session_state.show_history:
                         st.write(f"**Client Site:** {session['client_site']}")
                         st.write(f"**Sites Analyzed:** {session['num_sites']} competitors, max {session['max_pages']} pages each")
                         if is_current:
-                            st.success("✅ This is your currently loaded analysis")
+                            st.success("This is your currently loaded analysis")
                     
                     with col2:
                         if not is_current:
-                            if st.button(f"📋 Load This Analysis", key=f"load_{session['id']}"):
+                            if st.button(f"Load This Analysis", key=f"load_{session['id']}"):
                                 session_info, competitor_results, client_results = db.load_session_details(session['id'])
-                                if session_info is not None:
+                                if session_info:
                                     st.session_state.current_analysis = {
                                         'session_info': session_info,
                                         'competitor_results': competitor_results,
@@ -523,33 +558,29 @@ if st.session_state.show_history:
                                     }
                                     st.session_state.analysis_complete = True
                                     st.session_state.show_history = False
-                                    st.success(f"✅ Loaded analysis: {session_info['topic']}")
+                                    st.success(f"Loaded analysis: {session_info['topic']}")
                                     st.rerun()
                                 else:
                                     st.error("Failed to load session data")
                         else:
-                            st.button("✅ Currently Loaded", disabled=True, key=f"current_{session['id']}")
+                            st.button("Currently Loaded", disabled=True, key=f"current_{session['id']}")
                     
                     with col3:
                         if not is_current:
-                            if st.button(f"🗑️ Delete", key=f"del_{session['id']}"):
+                            if st.button(f"Delete", key=f"del_{session['id']}"):
                                 db.delete_session(session['id'])
                                 st.success("Session deleted!")
                                 st.rerun()
                         else:
-                            st.write("🛡️ Active")
+                            st.write("Active")
     
     except Exception as e:
         st.error(f"Database error: {e}")
-        st.info("Try refreshing the page or contact support.")
-    
-    st.markdown("---")
-    st.info("💡 **Tip:** Your current analysis remains loaded while browsing history.")
 
 # Main Analysis Interface
 if not st.session_state.analysis_complete and not st.session_state.show_history:
     with st.form("analysis_form"):
-        st.subheader("🔍 Configure Your SEO Analysis")
+        st.subheader("Configure Your SEO Analysis")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -559,11 +590,7 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
             client_site = st.text_input("Enter your client website URL:", placeholder="https://example.com")
             max_pages = st.slider("Max pages per site", 1, 20, 5)
 
-        # Show estimated time
-        estimated_time = (num_sites + 1) * max_pages * 2  # rough estimate in seconds
-        st.info(f"⏱️ Estimated analysis time: ~{estimated_time//60}m {estimated_time%60}s")
-
-        submitted = st.form_submit_button("🔍 Run Analysis", type="primary")
+        submitted = st.form_submit_button("Run Analysis", type="primary")
         
         if submitted:
             if not topic.strip():
@@ -573,19 +600,18 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
             elif not client_site.startswith(('http://', 'https://')):
                 st.error("Please include http:// or https:// in your client URL.")
             else:
-                # Run the analysis
                 with st.status("Running SEO Analysis...", expanded=True) as status:
                     progress_container = st.container()
                     
                     with progress_container:
-                        st.write(f"🔎 Searching competitors for: **{topic}**")
+                        st.write(f"Searching competitors for: **{topic}**")
                         root_links = search_topic(topic, num_sites)
                         
                         if not root_links:
                             st.error("No competitor sites found. Try a different keyword.")
                             st.stop()
                         
-                        st.write(f"✅ Found {len(root_links)} competitor sites")
+                        st.write(f"Found {len(root_links)} competitor sites")
                         for i, link in enumerate(root_links, 1):
                             st.write(f"   {i}. {link}")
 
@@ -594,38 +620,35 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
                     # Competitor crawl
                     for i, root in enumerate(root_links, 1):
                         with progress_container:
-                            st.write(f"🔎 **Step {i}/{len(root_links)}:** Analyzing {root}")
+                            st.write(f"**Step {i}/{len(root_links)}:** Analyzing {root}")
                         
                         site_results = crawl_site(root, topic, max_pages, progress_container, client=False)
                         all_results.extend(site_results)
                         
                         with progress_container:
-                            st.write(f"   ✅ Found {len(site_results)} pages")
-
-                    df_comp = pd.DataFrame(all_results)
+                            st.write(f"   Found {len(site_results)} pages")
 
                     # Client crawl
                     with progress_container:
-                        st.write(f"📝 **Final Step:** Analyzing client site: {client_site}")
+                        st.write(f"**Final Step:** Analyzing client site: {client_site}")
                     
                     client_results = crawl_site(client_site, topic, max_pages, progress_container, client=True)
-                    df_client = pd.DataFrame(client_results)
 
-                    # Results summary
                     with progress_container:
-                        st.write(f"✅ **Analysis Complete!**")
-                        st.write(f"   • Competitor pages scraped: **{len(df_comp)}**")
-                        st.write(f"   • Client pages scraped: **{len(df_client)}**")
+                        st.write(f"**Analysis Complete!**")
+                        st.write(f"   • Competitor pages scraped: **{len(all_results)}**")
+                        st.write(f"   • Client pages scraped: **{len(client_results)}**")
 
-                    if not df_comp.empty and not df_client.empty:
+                    if all_results and client_results:
                         # AI Recommendations
                         with progress_container:
-                            st.write("🤖 Generating AI recommendations...")
+                            st.write("Generating AI recommendations...")
                         
                         # Get best competitor content
-                        top_competitors = df_comp.sort_values("seo_score", ascending=False).head(3)
-                        competitor_text = " ".join(top_competitors["content"])
-                        client_text = " ".join(df_client["content"])
+                        all_results_sorted = sorted(all_results, key=lambda x: x['seo_score'], reverse=True)
+                        top_competitors = all_results_sorted[:3]
+                        competitor_text = " ".join([comp["content"] for comp in top_competitors])
+                        client_text = " ".join([client["content"] for client in client_results])
 
                         prompt = f"""
                         You are an SEO expert analyzing a website for the keyword "{topic}".
@@ -650,11 +673,11 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
                         try:
                             session_id = db.save_analysis_session(
                                 topic, client_site, num_sites, max_pages, 
-                                suggestions, df_comp, df_client
+                                suggestions, all_results, client_results
                             )
                             
                             with progress_container:
-                                st.write(f"💾 Saved to database (Session ID: {session_id})")
+                                st.write(f"Saved to database (Session ID: {session_id})")
 
                         except Exception as e:
                             st.warning(f"Failed to save to database: {e}")
@@ -671,242 +694,173 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
                                 'session_id': session_id,
                                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             },
-                            'competitor_results': df_comp,
-                            'client_results': df_client
+                            'competitor_results': all_results,
+                            'client_results': client_results
                         }
                         st.session_state.analysis_complete = True
                         
-                        status.update(label="✅ Analysis completed and saved!", state="complete")
-                        st.balloons()  # Celebration effect
+                        status.update(label="Analysis completed and saved!", state="complete")
                         st.rerun()
                     else:
-                        st.error("⚠️ Insufficient data collected. Try:")
-                        st.write("• Increasing the number of sites or pages per site")
-                        st.write("• Using a more specific keyword")
-                        st.write("• Checking if the client site is accessible")
+                        st.error("Insufficient data collected. Try increasing the number of sites or pages per site.")
 
 # Display Current Analysis Results
 if st.session_state.analysis_complete and st.session_state.current_analysis and not st.session_state.show_history:
     analysis = st.session_state.current_analysis
     session_info = analysis['session_info']
-    df_comp = analysis['competitor_results']
-    df_client = analysis['client_results']
+    competitor_results = analysis['competitor_results']
+    client_results = analysis['client_results']
     
-    st.success("✅ Analysis Results Ready")
+    st.success("Analysis Results Ready")
     
     # Analysis info header
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.info(f"**🎯 Topic:** {session_info['topic']} | **🏠 Client:** {session_info['client_site']}")
+        st.info(f"**Topic:** {session_info['topic']} | **Client:** {session_info['client_site']}")
     with col2:
         st.metric("Session ID", session_info.get('session_id', 'N/A'))
     
     # Main results tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "🏆 Competitors", "📝 Client Pages", "🤖 AI Strategy"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Dashboard", "Competitors", "Client Pages", "AI Strategy"])
     
     with tab1:
-        st.subheader("📊 Analysis Dashboard")
+        st.subheader("Analysis Dashboard")
         
         # Key metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Competitor Pages", len(df_comp))
+            st.metric("Competitor Pages", len(competitor_results))
         with col2:
-            st.metric("Client Pages", len(df_client))
+            st.metric("Client Pages", len(client_results))
         with col3:
-            avg_comp_score = df_comp['seo_score'].mean() if not df_comp.empty else 0
-            st.metric("Competitor Avg Score", f"{avg_comp_score:.1f}")
+            if competitor_results:
+                avg_comp_score = sum(r['seo_score'] for r in competitor_results) / len(competitor_results)
+                st.metric("Competitor Avg Score", f"{avg_comp_score:.1f}")
+            else:
+                st.metric("Competitor Avg Score", "0")
         with col4:
-            avg_client_score = df_client['seo_score'].mean() if not df_client.empty else 0
-            delta = avg_client_score - avg_comp_score
-            st.metric("Client Avg Score", f"{avg_client_score:.1f}", f"{delta:+.1f}")
-        
-        # Score comparison chart
-        if not df_comp.empty and not df_client.empty:
-            st.subheader("📈 SEO Score Comparison")
-            
-            # Create comparison data
-            comp_scores = df_comp['seo_score'].tolist()
-            client_scores = df_client['seo_score'].tolist()
-            
-            # Simple bar chart using Streamlit
-            chart_data = pd.DataFrame({
-                'Competitor Pages': comp_scores + [0] * (max(len(client_scores) - len(comp_scores), 0)),
-                'Client Pages': [0] * (max(len(comp_scores) - len(client_scores), 0)) + client_scores
-            })
-            
-            st.bar_chart(chart_data)
+            if client_results:
+                avg_client_score = sum(r['seo_score'] for r in client_results) / len(client_results)
+                st.metric("Client Avg Score", f"{avg_client_score:.1f}")
+            else:
+                st.metric("Client Avg Score", "0")
     
     with tab2:
-        st.subheader("🏆 Competitor Analysis")
+        st.subheader("Competitor Analysis")
         
-        # Top performer
-        if not df_comp.empty:
-            best_competitor = df_comp.sort_values("seo_score", ascending=False).iloc[0]
-            st.success(f"🏆 **Top Competitor:** {best_competitor['url']} (Score: {best_competitor['seo_score']})")
+        if competitor_results:
+            # Sort by score
+            sorted_competitors = sorted(competitor_results, key=lambda x: x['seo_score'], reverse=True)
+            best_competitor = sorted_competitors[0]
+            st.success(f"**Top Competitor:** {best_competitor['url']} (Score: {best_competitor['seo_score']})")
             
-            with st.expander("🔍 View Top Competitor Details"):
-                st.write(f"**Title:** {best_competitor['title']}")
-                st.write(f"**Meta Description:** {best_competitor['meta']}")
-                st.write(f"**H1:** {best_competitor['h1']}")
-                st.write(f"**Word Count:** {best_competitor['word_count']}")
-        
-        # All competitors table
-        st.subheader("📊 All Competitor Pages")
-        if not df_comp.empty:
-            display_cols = ["url", "title", "seo_score", "word_count"]
-            st.dataframe(
-                df_comp[display_cols].sort_values("seo_score", ascending=False), 
-                use_container_width=True,
-                hide_index=True
-            )
+            # Display as table
+            st.subheader("All Competitor Pages")
+            for i, comp in enumerate(sorted_competitors, 1):
+                with st.expander(f"{i}. {comp['url']} (Score: {comp['seo_score']})"):
+                    st.write(f"**Title:** {comp['title']}")
+                    st.write(f"**Meta Description:** {comp['meta']}")
+                    st.write(f"**H1:** {comp['h1']}")
+                    st.write(f"**Word Count:** {comp['word_count']}")
         else:
             st.warning("No competitor data available")
     
     with tab3:
-        st.subheader("📝 Your Client's Pages")
+        st.subheader("Your Client's Pages")
         
-        if not df_client.empty:
-            # Best client page
-            best_client = df_client.sort_values("seo_score", ascending=False).iloc[0]
-            st.info(f"⭐ **Best Client Page:** {best_client['url']} (Score: {best_client['seo_score']})")
+        if client_results:
+            sorted_client = sorted(client_results, key=lambda x: x['seo_score'], reverse=True)
+            best_client = sorted_client[0]
+            st.info(f"**Best Client Page:** {best_client['url']} (Score: {best_client['seo_score']})")
             
-            # All client pages
-            display_cols = ["url", "title", "seo_score", "word_count"]
-            st.dataframe(
-                df_client[display_cols].sort_values("seo_score", ascending=False), 
-                use_container_width=True,
-                hide_index=True
-            )
+            for i, client in enumerate(sorted_client, 1):
+                with st.expander(f"{i}. {client['url']} (Score: {client['seo_score']})"):
+                    st.write(f"**Title:** {client['title']}")
+                    st.write(f"**Meta Description:** {client['meta']}")
+                    st.write(f"**H1:** {client['h1']}")
+                    st.write(f"**Word Count:** {client['word_count']}")
         else:
             st.warning("No client data available")
     
     with tab4:
-        st.subheader("🤖 AI-Powered SEO Strategy")
-        
-        # Display recommendations in a nice format
-        recommendations = session_info['ai_recommendations']
-        
-        if "⚠️" in recommendations:
-            st.error("AI recommendations failed to generate properly. Please try running the analysis again.")
-        else:
-            st.markdown(recommendations)
-        
-        # Action items extraction
-        st.markdown("---")
-        st.subheader("✅ Quick Action Items")
-        st.info("💡 **Pro Tip:** Use the AI recommendations above to implement these improvements on your client's website.")
+        st.subheader("AI-Powered SEO Strategy")
+        st.markdown(session_info['ai_recommendations'])
     
     # Download Section
     st.markdown("---")
-    st.subheader("💾 Export Results")
+    st.subheader("Export Results")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if not df_comp.empty:
-            csv_comp = df_comp.to_csv(index=False).encode("utf-8")
+        if competitor_results:
+            headers = ['url', 'title', 'meta', 'h1', 'word_count', 'seo_score']
+            csv_content = create_csv(competitor_results, headers)
             st.download_button(
-                "📥 Competitor Data (CSV)", 
-                csv_comp, 
-                f"competitors_{session_info['topic'].replace(' ', '_')}_{session_info.get('session_id', 'current')}.csv", 
+                "Competitor Data (CSV)", 
+                csv_content.encode("utf-8"), 
+                f"competitors_{session_info['topic'].replace(' ', '_')}.csv", 
                 "text/csv",
                 key="download_comp"
             )
     
     with col2:
-        if not df_client.empty:
-            csv_client = df_client.to_csv(index=False).encode("utf-8")
+        if client_results:
+            headers = ['url', 'title', 'meta', 'h1', 'word_count', 'seo_score']
+            csv_content = create_csv(client_results, headers)
             st.download_button(
-                "📥 Client Data (CSV)", 
-                csv_client, 
-                f"client_{session_info['topic'].replace(' ', '_')}_{session_info.get('session_id', 'current')}.csv", 
+                "Client Data (CSV)", 
+                csv_content.encode("utf-8"), 
+                f"client_{session_info['topic'].replace(' ', '_')}.csv", 
                 "text/csv",
                 key="download_client"
             )
     
     with col3:
         st.download_button(
-            "📥 AI Strategy (TXT)", 
+            "AI Strategy (TXT)", 
             session_info['ai_recommendations'].encode("utf-8"), 
-            f"seo_strategy_{session_info['topic'].replace(' ', '_')}_{session_info.get('session_id', 'current')}.txt", 
+            f"seo_strategy_{session_info['topic'].replace(' ', '_')}.txt", 
             "text/plain",
             key="download_ai"
         )
 
-# Sidebar with enhanced info
+# Sidebar
 with st.sidebar:
-    st.header("🎛️ System Status")
+    st.header("System Status")
     
-    # Current analysis status
     if st.session_state.analysis_complete:
-        st.success("✅ Analysis Loaded")
+        st.success("Analysis Loaded")
         analysis = st.session_state.current_analysis
         if analysis and 'session_info' in analysis:
-            st.write(f"**📊 Topic:** {analysis['session_info']['topic']}")
+            st.write(f"**Topic:** {analysis['session_info']['topic']}")
             competitor_count = len(analysis['competitor_results'])
             client_count = len(analysis['client_results'])
-            st.write(f"**📄 Pages:** {competitor_count + client_count} total")
+            st.write(f"**Pages:** {competitor_count + client_count} total")
     else:
-        st.info("⏳ Ready for New Analysis")
+        st.info("Ready for New Analysis")
     
     st.markdown("---")
-    st.header("🗄️ Database Status")
+    st.header("Database Status")
     
-    db_info = db.get_database_info()
+    st.write("**Type:** SQLite (Pandas-Free)")
     
-    if db_info["type"] == "SQLite":
-        st.write(f"**Type:** {db_info['type']}")
-        if "size_mb" in db_info:
-            st.metric("Database Size", f"{db_info['size_mb']:.2f} MB")
-        
-        # Session count
-        try:
-            sessions = db.load_analysis_sessions()
-            st.metric("Stored Sessions", len(sessions))
-        except Exception:
-            st.metric("Stored Sessions", "Error loading")
-        
-        # Clear history option
-        if st.button("🗑️ Clear All History"):
-            if st.checkbox("⚠️ Confirm deletion of all analysis data"):
-                try:
-                    if os.path.exists(LOCAL_DB_PATH):
-                        os.remove(LOCAL_DB_PATH)
-                    # Reinitialize database
-                    db.init_database()
-                    st.success("✅ History cleared!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to clear: {e}")
+    try:
+        sessions = db.load_analysis_sessions()
+        st.metric("Stored Sessions", len(sessions))
+    except Exception:
+        st.metric("Stored Sessions", "Error loading")
     
-    else:  # PostgreSQL
-        st.success(f"**Type:** {db_info['type']} ✅")
-        st.write("**Persistence:** Full")
-        try:
-            sessions = db.load_analysis_sessions()
-            st.metric("Stored Sessions", len(sessions))
-        except Exception:
-            st.metric("Stored Sessions", "Connection Error")
+    if st.button("Clear All History"):
+        if st.checkbox("Confirm deletion of all analysis data"):
+            try:
+                if os.path.exists(LOCAL_DB_PATH):
+                    os.remove(LOCAL_DB_PATH)
+                db.init_database()
+                st.success("History cleared!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to clear: {e}")
     
     st.markdown("---")
-    st.header("🚀 Migration Ready")
-    st.info("💾 **Future-Proof:** This app is ready to migrate from SQLite to PostgreSQL by simply setting environment variables!")
-    
-    if not USE_ONLINE_DB:
-        st.write("**Next Steps:**")
-        st.write("1. Add PostgreSQL to Render")
-        st.write("2. Set `USE_ONLINE_DB=true`")
-        st.write("3. Data will automatically migrate!")
-
-# Footer
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: #666; padding: 20px;'>
-        <p>🚀 <strong>SEO Analyzer Pro</strong> | Built for Render Cloud Deployment</p>
-        <p>💡 Ready for SQLite → PostgreSQL migration</p>
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+    st.info("This pandas-free version avoids compilation issues while maintaining full functionality.")
