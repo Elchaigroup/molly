@@ -1,11 +1,21 @@
 services:
   - type: web
-    name: seo-analyzer
+    name: seo-analyzer-pro
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
+    region: oregon
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install --no-cache-dir -r requirements.txt
+    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: PIP_NO_CACHE_DIR
+        value: "1"
       - key: SCRAPINGDOG_API_KEY
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: RENDER
+        value: "true"
