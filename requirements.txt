@@ -1,3 +1,6 @@
-streamlit==1.25.0
-requests==2.28.2
-beautifulsoup4==4.11.2
+# Legacy stable versions - guaranteed pre-built wheels
+# Compatible with Python 3.11
+
+streamlit==1.22.0
+requests==2.27.1  
+beautifulsoup4==4.10.0
