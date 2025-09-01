@@ -1,5 +1,27 @@
-streamlit==1.29.0
-requests==2.31.0
-beautifulsoup4==4.12.2
-pandas==2.1.4
-psycopg2-binary==2.9.7
+# Render-optimized requirements.txt - Pre-compiled wheels only
+# This avoids all compilation issues
+
+# Force pip to use pre-built wheels only
+--only-binary=all
+
+# Core dependencies - versions with guaranteed pre-built wheels
+streamlit==1.25.0
+pandas==1.5.3
+numpy==1.24.3
+requests==2.28.2
+beautifulsoup4==4.11.2
+
+# Streamlit dependencies (explicit to avoid conflicts)
+altair==4.2.2
+click==8.1.7
+importlib-metadata==6.8.0
+pillow==9.5.0
+protobuf==4.23.4
+pyarrow==12.0.1
+python-dateutil==2.8.2
+pytz==2023.3
+tornado==6.3.3
+typing-extensions==4.7.1
+tzlocal==5.0.1
+validators==0.20.0
+watchdog==3.0.0
