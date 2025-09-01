@@ -1,4 +1,8 @@
 import streamlit as st
+
+# MUST BE FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="SEO Analyzer Pro", layout="wide")
+
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -468,7 +472,6 @@ if 'show_history' not in st.session_state:
 # -------------------
 # STREAMLIT APP
 # -------------------
-st.set_page_config(page_title="SEO Analyzer Pro", layout="wide")
 
 # Header
 col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
