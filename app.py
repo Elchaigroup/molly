@@ -483,24 +483,24 @@ with col2:
     if st.session_state.show_history:
         if st.button("Back to Analysis", type="secondary"):
             st.session_state.show_history = False
-            st.rerun()
+            st.experimental_rerun()
     else:
         if st.button("View History", type="secondary"):
             st.session_state.show_history = True
-            st.rerun()
+                                            st.experimental_rerun()
 
 with col3:
     if st.session_state.analysis_complete:
         if st.button("Current Analysis", type="secondary", disabled=not st.session_state.show_history):
             st.session_state.show_history = False
-            st.rerun()
+                                    st.experimental_rerun()
 
 with col4:
     if st.button("New Analysis", type="primary"):
         st.session_state.current_analysis = None
         st.session_state.analysis_complete = False
         st.session_state.show_history = False
-        st.rerun()
+                                st.experimental_rerun()
 
 # Status bar
 if st.session_state.analysis_complete and st.session_state.current_analysis:
@@ -562,7 +562,7 @@ if st.session_state.show_history:
                                     st.session_state.analysis_complete = True
                                     st.session_state.show_history = False
                                     st.success(f"Loaded analysis: {session_info['topic']}")
-                                    st.rerun()
+                                    st.experimental_rerun()
                                 else:
                                     st.error("Failed to load session data")
                         else:
@@ -573,7 +573,7 @@ if st.session_state.show_history:
                             if st.button(f"Delete", key=f"del_{session['id']}"):
                                 db.delete_session(session['id'])
                                 st.success("Session deleted!")
-                                st.rerun()
+                                st.experimental_rerun()
                         else:
                             st.write("Active")
     
@@ -713,7 +713,7 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
                         progress_placeholder.empty()
                         status_placeholder.success("✅ Analysis completed and saved!")
                         time.sleep(1)  # Brief pause to show success message
-                        st.rerun()
+                        st.experimental_rerun()
                     else:
                         progress_placeholder.empty()
                         status_placeholder.error("❌ Insufficient data collected. Try increasing the number of sites or pages per site.")
