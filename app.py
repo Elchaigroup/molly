@@ -487,20 +487,20 @@ with col2:
     else:
         if st.button("View History", type="secondary"):
             st.session_state.show_history = True
-                                            st.experimental_rerun()
+            st.experimental_rerun()
 
 with col3:
     if st.session_state.analysis_complete:
         if st.button("Current Analysis", type="secondary", disabled=not st.session_state.show_history):
             st.session_state.show_history = False
-                                    st.experimental_rerun()
+            st.experimental_rerun()
 
 with col4:
     if st.button("New Analysis", type="primary"):
         st.session_state.current_analysis = None
         st.session_state.analysis_complete = False
         st.session_state.show_history = False
-                                st.experimental_rerun()
+        st.experimental_rerun()
 
 # Status bar
 if st.session_state.analysis_complete and st.session_state.current_analysis:
@@ -872,7 +872,7 @@ with st.sidebar:
                     os.remove(LOCAL_DB_PATH)
                 db.init_database()
                 st.success("History cleared!")
-                st.rerun()
+                st.experimental_rerun()
             except Exception as e:
                 st.error(f"Failed to clear: {e}")
     
