@@ -603,7 +603,14 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
             elif not client_site.startswith(('http://', 'https://')):
                 st.error("Please include http:// or https:// in your client URL.")
             else:
-                with st.status("Running SEO Analysis...", expanded=True) as status:
+                # Create progress indicators using basic Streamlit components
+                progress_placeholder = st.empty()
+                status_placeholder = st.empty()
+                
+                with status_placeholder.container():
+                    st.info("🚀 Running SEO Analysis...")
+                    
+                with progress_placeholder.container():
                     progress_container = st.container()
                     
                     with progress_container:
@@ -702,10 +709,14 @@ if not st.session_state.analysis_complete and not st.session_state.show_history:
                         }
                         st.session_state.analysis_complete = True
                         
-                        status.update(label="Analysis completed and saved!", state="complete")
+                        # Clear progress indicators and show success
+                        progress_placeholder.empty()
+                        status_placeholder.success("✅ Analysis completed and saved!")
+                        time.sleep(1)  # Brief pause to show success message
                         st.rerun()
                     else:
-                        st.error("Insufficient data collected. Try increasing the number of sites or pages per site.")
+                        progress_placeholder.empty()
+                        status_placeholder.error("❌ Insufficient data collected. Try increasing the number of sites or pages per site.")
 
 # Display Current Analysis Results
 if st.session_state.analysis_complete and st.session_state.current_analysis and not st.session_state.show_history:
